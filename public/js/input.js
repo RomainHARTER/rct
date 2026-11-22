@@ -6,7 +6,7 @@ import { cam, screenToTile, pickAt } from './render.js';
 import { placeRide, placePath, placeScenery, placeFurniture, terraform, demolishAt, placeGate } from './rides.js';
 import { createCoaster, removeLastPiece, placeDesign } from './coaster.js';
 import { hooks } from './guests.js';
-import { flash, setTool, openRideWindow, openGuestWindow, openStaffWindow, openBuilder, buildPiece, closeAllWins, startGatePlacement, gatePlaced } from './ui.js';
+import { flash, setTool, closeWin, openRideWindow, openGuestWindow, openStaffWindow, openBuilder, buildPiece, closeAllWins, startGatePlacement, gatePlaced } from './ui.js';
 
 const keys = new Set();
 let drag = null;     // { mode: 'pan'|'paint', sx, sy, cx, cy, moved }
@@ -22,7 +22,19 @@ function applyTool(x, y, painting = false) {
     case 'furn': err = placeFurniture(t.type, x, y); break;
     case 'scenery': err = placeScenery(t.type, x, y); if (painting && err) err = null; break;
     case 'terraform': err = terraform(t.mode, x, y); if (painting && err) err = null; break;
-    case 'demolish': err = demolishAt(x, y, hooks); if (painting && err) err = null; break;
+    case 'demolish':
+      err = demolishAt(x, y, hooks, {
+        // en glissant on ne démolit jamais une attraction entière ; au clic on demande confirmation
+        confirmRide: r => {
+          if (painting) return false;
+          const ok = confirm(`Démolir entièrement ${r.name} ? Vous récupérerez ${Math.round(r.value * 0.5).toLocaleString('fr-FR')} €.`);
+          if (ok && UI.tool?.rideId === r.id) setTool(null);
+          if (ok) { UI.selected = null; closeWin('ride:' + r.id); }
+          return ok;
+        },
+      });
+      if (painting && err) err = null;
+      break;
     case 'ride': {
       const def = RIDES[t.type] || STALLS[t.type];
       const ox = x - Math.floor((def.size - 1) / 2), oy = y - Math.floor((def.size - 1) / 2);

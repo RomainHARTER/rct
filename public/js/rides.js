@@ -213,7 +213,9 @@ export function terraform(mode, x, y) {
 }
 
 // Démolition à une tuile : renvoie un descriptif ou une erreur
-export function demolishAt(x, y, hooks) {
+// Démolition à une tuile. Ordre : portique, mobilier, chemin, décor, puis attraction.
+// Une attraction entière n'est démolie que si opts.confirmRide(ride) renvoie true.
+export function demolishAt(x, y, hooks, opts = {}) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
   if (RT.gate[i]) {
@@ -223,15 +225,20 @@ export function demolishAt(x, y, hooks) {
     invalidateFields();
     return null;
   }
-  if (RT.obj[i]) { const r = rideById(RT.obj[i]); demolishRide(r, hooks); return null; }
-  if (RT.track[i]?.length) { const r = RT.track[i][0].ride; demolishRide(r, hooks); return null; }
   if (G.furn[i]) { G.furn[i] = null; invalidateFields(); return null; }
-  if (G.scen[i]) { G.scen[i] = null; spend('landscaping', 5); return null; }
   if (G.path[i]) {
     if (G.entrance.x === x && G.entrance.y === y) return 'Impossible de détruire l\'entrée';
+    const refund = Math.round((G.path[i] === 2 ? QUEUE_COST : PATH_COST) / 2);
     G.path[i] = 0; G.litter[i] = 0; G.vomit[i] = 0; unlinkTile(x, y);
-    spend('construction', -Math.round(PATH_COST / 2));
+    spend('construction', -refund);
     invalidateFields();
+    return null;
+  }
+  if (G.scen[i]) { G.scen[i] = null; spend('landscaping', 5); return null; }
+  const r = RT.obj[i] ? rideById(RT.obj[i]) : RT.track[i]?.length ? RT.track[i][0].ride : null;
+  if (r) {
+    if (!opts.confirmRide || !opts.confirmRide(r)) return null;
+    demolishRide(r, hooks);
     return null;
   }
   return 'Rien à démolir';
