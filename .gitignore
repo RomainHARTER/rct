@@ -1,0 +1,5 @@
+data/*
+!data/.gitkeep
+!data/.htaccess
+.DS_Store
+node_modules/
