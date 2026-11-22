@@ -3,6 +3,7 @@ import { G, RT, idx, inB, rideById } from './state.js';
 import { TW, TH, ZH, TERRAIN, COASTERS, RIDES, STALLS, DX, DY, STAFF, TILE_M, H_M } from './config.js';
 import { piecePoint, carPositions, previewPiece, canAppend, stationTiles, canStartCoaster, STATION_PIECES, designPieces, canPlaceDesign } from './coaster.js';
 import { DESIGNS } from './config.js';
+import { queueLinked, gateLinked } from './path.js';
 import { canPlaceRide, canPath, canScenery, canFurniture, canTerraform, canPlaceGate, footprint } from './rides.js';
 import { UI } from './uistate.js';
 
@@ -125,12 +126,24 @@ function edge(x, y, d) {
   return [[x, y], [x + 1, y]];
 }
 
+const OPPD = [2, 3, 0, 1];
+// Le chemin (x,y) est-il raccordé visuellement dans la direction d ?
+function connects(x, y, d) {
+  const nx = x + DX[d], ny = y + DY[d];
+  if (!inB(nx, ny)) return false;
+  const here = G.path[idx(x, y)], there = G.path[idx(nx, ny)], gate = RT.gate[idx(nx, ny)];
+  if (here === 2) return queueLinked(x, y, d);
+  if (there === 1) return true;
+  if (there === 2) return queueLinked(nx, ny, OPPD[d]);
+  if (gate) return gate.kind === 'exit' || !gateLinked(nx, ny);
+  return false;
+}
 function pathRects(x, y, w) {
   const a = 0.5 - w / 2, b = 0.5 + w / 2;
   const out = [[x + a, y + a, x + b, y + b]];
   for (let d = 0; d < 4; d++) {
     const nx = x + DX[d], ny = y + DY[d];
-    if (!(inB(nx, ny) && (G.path[idx(nx, ny)] || RT.gate[idx(nx, ny)])) && !(d === 1 && x === G.entrance.x && y === G.entrance.y)) continue;
+    if (!connects(x, y, d) && !(d === 1 && x === G.entrance.x && y === G.entrance.y)) continue;
     if (d === 0) out.push([x + 0.5, y + a, x + 1, y + b]);
     if (d === 1) out.push([x + a, y + 0.5, x + b, y + 1]);
     if (d === 2) out.push([x, y + a, x + 0.5, y + b]);

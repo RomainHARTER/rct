@@ -1,7 +1,7 @@
 // Placement et fonctionnement des attractions, boutiques, décor, chemins
 import { G, RT, idx, inB, invalidateFields, spend, canAfford, addMsg, rideById } from './state.js';
 import { RIDES, STALLS, SCENERY, FURNITURE, TERRAIN, PATH_COST, TERRAFORM_COST, COASTERS } from './config.js';
-import { adjacentPaths, isPath } from './path.js';
+import { adjacentPaths, isPath, linkQueueTile, unlinkTile, linkEntrance } from './path.js';
 import { STATION_PIECES, demolishCoaster, updateCoaster, pieceRange } from './coaster.js';
 
 export const defOf = r => r.kind === 'coaster' ? COASTERS[r.type] : (RIDES[r.type] || STALLS[r.type]);
@@ -52,16 +52,18 @@ export function placeGate(r, kind, x, y) {
   const i = idx(x, y);
   const other = kind === 'entrance' ? 'exit' : 'entrance';
   if (r[other] && r[other].x === x && r[other].y === y) r[other] = null;
-  if (r[kind]) RT.gate[idx(r[kind].x, r[kind].y)] = null;
+  if (r[kind]) { RT.gate[idx(r[kind].x, r[kind].y)] = null; unlinkTile(r[kind].x, r[kind].y); }
   r[kind] = { x, y };
   RT.gate[i] = { ride: r, kind };
   G.scen[i] = null;
+  unlinkTile(x, y);
+  if (kind === 'entrance') linkEntrance(x, y);
   invalidateFields();
   return null;
 }
 
 function removeGates(r) {
-  for (const k of ['entrance', 'exit']) if (r[k]) { RT.gate[idx(r[k].x, r[k].y)] = null; }
+  for (const k of ['entrance', 'exit']) if (r[k]) { RT.gate[idx(r[k].x, r[k].y)] = null; unlinkTile(r[k].x, r[k].y); }
 }
 
 function lowTrack(i, minClear = 3) {
@@ -149,6 +151,8 @@ export function placePath(x, y, kind = 1) {
   if (err) return err;
   const i = idx(x, y);
   G.path[i] = kind; G.scen[i] = null; G.furn[i] = kind === 2 ? null : G.furn[i];
+  unlinkTile(x, y);
+  if (kind === 2) linkQueueTile(x, y);
   spend('construction', kind === 2 ? QUEUE_COST : PATH_COST);
   invalidateFields();
   return null;
@@ -214,7 +218,7 @@ export function demolishAt(x, y, hooks) {
   const i = idx(x, y);
   if (RT.gate[i]) {
     const { ride, kind } = RT.gate[i];
-    RT.gate[i] = null; ride[kind] = null;
+    RT.gate[i] = null; ride[kind] = null; unlinkTile(x, y);
     if (ride.status === 'open') { ride.status = 'closed'; hooks.evictQueue(ride, `${ride.name} a fermé`); }
     invalidateFields();
     return null;
@@ -225,7 +229,7 @@ export function demolishAt(x, y, hooks) {
   if (G.scen[i]) { G.scen[i] = null; spend('landscaping', 5); return null; }
   if (G.path[i]) {
     if (G.entrance.x === x && G.entrance.y === y) return 'Impossible de détruire l\'entrée';
-    G.path[i] = 0; G.litter[i] = 0; G.vomit[i] = 0;
+    G.path[i] = 0; G.litter[i] = 0; G.vomit[i] = 0; unlinkTile(x, y);
     spend('construction', -Math.round(PATH_COST / 2));
     invalidateFields();
     return null;

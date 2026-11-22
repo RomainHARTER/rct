@@ -1,5 +1,6 @@
 // État global du jeu, génération de carte, sauvegarde/chargement
 import { SCENARIOS, TERRAIN, MONTHS, MONTH_SECONDS } from './config.js';
+import { relinkAllQueues } from './path.js';
 
 export const G = {};          // état sérialisable
 export const RT = {           // état d'exécution (non sauvegardé)
@@ -50,6 +51,7 @@ export function newGame(scenarioId) {
     w: n, h: n,
     terrain: new Array(n * n).fill(TERRAIN.GRASS),
     path: new Array(n * n).fill(0),
+    qlink: new Array(n * n).fill(0),
     scen: new Array(n * n).fill(null),
     furn: new Array(n * n).fill(null),
     litter: new Array(n * n).fill(0),
@@ -175,5 +177,6 @@ export function deserialize(data) {
   for (const k of Object.keys(G)) delete G[k];
   Object.assign(G, data);
   rebuildIndexes();
+  if (!G.qlink) relinkAllQueues(); // anciennes sauvegardes
   emit('newgame');
 }

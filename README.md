@@ -27,7 +27,7 @@ Sur un hébergement mutualisé, il suffit de copier le dossier `public/` à la r
 - **Carte isométrique** générée par scénario (herbe, sable, lacs, forêts), zoom et déplacement.
 - **Parc fermé au démarrage** : construisez tranquillement, puis ouvrez-le avec le bouton 🔒 de la barre du haut.
 - **Chemins** tracés au cliqué-glissé, avec bancs, poubelles et lampadaires.
-- **Entrées / sorties d'attraction et files d'attente** : chaque manège et chaque montagne russe a une entrée (verte) et une sortie (rouge) à placer contre l'attraction ou sa gare. Les files d'attente (chemin bleu) relient l'entrée au réseau : les visiteurs y font la queue, et les promeneurs ne les empruntent pas.
+- **Entrées / sorties d'attraction et files d'attente** : chaque manège et chaque montagne russe a une entrée (verte) et une sortie (rouge) à placer contre l'attraction ou sa gare. Les files d'attente (chemin bleu) forment une ligne unique : chaque case se relie à au plus deux voisines (entrée, case de file précédente/suivante), et seule l'extrémité libre se raccorde à un chemin normal, celui qui mène à l'entrée du parc en priorité. Longer une allée ne crée donc aucun raccord parasite, et les visiteurs n'entrent dans la file que par son bout.
 - **3 montagnes russes prédéfinies**, prêtes à poser en un clic (R pour pivoter) : La Chenille (junior), La Tornade (acier), Le Grizzly (bois).
 - **7 manèges animés** : carrousel, grande roue, bateau balançoire, autos tamponneuses, tasses, tour de chute, chaises volantes.
 - **7 boutiques et services** : burgers, pizzas, boissons, glaces, ballons, toilettes, kiosque d'information.

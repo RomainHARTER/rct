@@ -1,7 +1,7 @@
 // Visiteurs : besoins, décisions, déplacements, files d'attente
 import { G, RT, idx, inB, spend, rideById, invalidateFields } from './state.js';
 import { FIRST_NAMES, SHIRTS, SKINS, SCENERY, STALLS, DX, DY } from './config.js';
-import { getField, stepToward, pathNeighbors, isPath, rideFieldFrom } from './path.js';
+import { getField, stepToward, pathNeighbors, isPath, rideFieldFrom, queueChainFrom } from './path.js';
 import { accessTiles, exitTiles, defOf } from './rides.js';
 
 const SPEED = 1.15; // tuiles / seconde
@@ -32,18 +32,8 @@ function queueLine(r) {
   if (line) return line;
   line = [];
   if (r.entrance) {
-    let x = r.entrance.x, y = r.entrance.y;
-    const seen = new Set([idx(x, y)]);
-    line.push([x + 0.5, y + 0.5]);
-    for (;;) {
-      let nxt = null;
-      for (let d = 0; d < 4 && !nxt; d++) {
-        const nx = x + DX[d], ny = y + DY[d];
-        if (inB(nx, ny) && G.path[idx(nx, ny)] === 2 && !seen.has(idx(nx, ny))) nxt = [nx, ny];
-      }
-      if (!nxt) break;
-      [x, y] = nxt; seen.add(idx(x, y)); line.push([x + 0.5, y + 0.5]);
-    }
+    line.push([r.entrance.x + 0.5, r.entrance.y + 0.5]);
+    for (const i of queueChainFrom(r.entrance.x, r.entrance.y)) line.push([i % G.w + 0.5, ((i / G.w) | 0) + 0.5]);
   }
   RT.fields.set(key, line);
   return line;
@@ -424,7 +414,7 @@ function chooseNext(g) {
       if (g.goal.type !== 'exit') g.goal = null;
     } else {
       if (f[here] === 0) { arrive(g); if (g.state !== 'walk') return; }
-      const n = g.goal ? stepToward(fieldForGoal(g.goal), g.tx, g.ty) : null;
+      const n = g.goal ? stepToward(fieldForGoal(g.goal), g.tx, g.ty, g.goal.type === 'ride') : null;
       if (n && g.goal.type === 'ride' && (G.path[idx(n[0], n[1])] === 2 || RT.gate[idx(n[0], n[1])])) { arrive(g); if (g.state !== 'walk') return; }
       else if (n) { g.nx = n[0]; g.ny = n[1]; return; }
     }
