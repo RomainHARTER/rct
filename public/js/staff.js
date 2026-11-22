@@ -48,6 +48,7 @@ function adjacentBroken(x, y) {
     const i = idx(nx, ny);
     let r = RT.obj[i] ? rideById(RT.obj[i]) : null;
     if (!r && RT.track[i]?.length) r = RT.track[i][0].ride;
+    if (!r && RT.gate[i]) r = RT.gate[i].ride;
     if (r && r.status === 'broken') return r;
   }
   return null;

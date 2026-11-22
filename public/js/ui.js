@@ -1,10 +1,10 @@
 // Interface HTML : barre du haut, palettes, fenêtres
 import { G, rideById, guestById, dateString, serialize, deserialize, newGame, on, invalidateFields } from './state.js';
-import { RIDES, STALLS, COASTERS, SCENERY, FURNITURE, STAFF, PIECES, PATH_COST, TERRAFORM_COST, SCENARIOS, MONTHS } from './config.js';
+import { RIDES, STALLS, COASTERS, SCENERY, FURNITURE, STAFF, PIECES, DESIGNS, PATH_COST, TERRAFORM_COST, SCENARIOS, MONTHS } from './config.js';
 import { UI } from './uistate.js';
 import { centerOn } from './render.js';
-import { setRideStatus, demolishRide, defOf, accessTiles } from './rides.js';
-import { appendPiece, removeLastPiece, canAppend, capacity, STATION_PIECES, resetTrain } from './coaster.js';
+import { setRideStatus, demolishRide, defOf, accessTiles, QUEUE_COST } from './rides.js';
+import { appendPiece, removeLastPiece, canAppend, capacity, STATION_PIECES, resetTrain, designCost } from './coaster.js';
 import { hooks, rideValue, avgHappiness } from './guests.js';
 import { hireStaff, fireStaff } from './staff.js';
 import { takeLoan, repayLoan, companyValue, parkValue, guestCapacity } from './sim.js';
@@ -85,10 +85,13 @@ function paletteItems(cat) {
   switch (cat) {
     case 'paths': return [
       { label: 'Chemin', icon: '🟫', cost: PATH_COST, tool: { kind: 'path' }, tip: 'Cliquez-glissez pour tracer' },
+      { label: 'File d\'attente', icon: '🟦', cost: QUEUE_COST, tool: { kind: 'path', queue: true }, tip: 'Relie l\'entrée d\'une attraction au chemin : les visiteurs y font la queue' },
       ...Object.entries(FURNITURE).map(([k, d]) => ({ label: d.name, icon: { bench: '🪑', bin: '🗑️', lamp: '💡' }[k], cost: d.cost, tool: { kind: 'furn', type: k }, tip: 'Sur un chemin' })),
     ];
     case 'rides': return Object.entries(RIDES).map(([k, d]) => ({ label: d.name, icon: d.icon, cost: d.cost, tool: { kind: 'ride', type: k }, tip: `${d.size}×${d.size} · Exc ${d.exc} · Int ${d.int} · Nau ${d.nau}` }));
-    case 'coasters': return Object.entries(COASTERS).map(([k, d]) => ({ label: d.name, icon: d.icon, cost: d.stationCost * STATION_PIECES, tool: { kind: 'coasterStart', type: k, dir: 0 }, tip: `Hauteur max ${d.maxH} · ${d.pieceCost} €/pièce · R pour tourner la gare` }));
+    case 'coasters': return [
+      ...Object.entries(DESIGNS).map(([k, d]) => ({ label: d.name, icon: d.icon, cost: designCost(k), tool: { kind: 'design', key: k, dir: 0 }, tip: `${d.desc} · ${COASTERS[d.type].name} · R pour pivoter` })),
+      ...Object.entries(COASTERS).map(([k, d]) => ({ label: 'Créer : ' + d.name, icon: d.icon, cost: d.stationCost * STATION_PIECES, tool: { kind: 'coasterStart', type: k, dir: 0 }, tip: `Construction libre · Hauteur max ${d.maxH} · ${d.pieceCost} €/pièce · R pour tourner la gare` }))];
     case 'shops': return Object.entries(STALLS).map(([k, d]) => ({ label: d.name, icon: d.icon, cost: d.cost, tool: { kind: 'ride', type: k }, tip: d.item ? `Vend : ${d.item}` : 'Service' }));
     case 'scenery': return Object.entries(SCENERY).map(([k, d]) => ({ label: d.name, icon: { oak: '🌳', pine: '🌲', palm: '🌴', bush: '🌿', flowers: '🌷', fountain: '⛲', statue: '🗿', hedge: '🟩' }[k], cost: d.cost, tool: { kind: 'scenery', type: k }, tip: `Beauté +${d.beauty}` }));
     case 'terrain': return [
@@ -138,6 +141,9 @@ function updateHUD() {
   f.querySelector('[data-f=guests]').textContent = G.guests.length;
   f.querySelector('[data-f=rating]').textContent = G.rating;
   f.querySelector('[data-f=date]').textContent = dateString();
+  const pb = f.querySelector('[data-f=parkbtn]');
+  pb.textContent = G.entranceClosed ? '🔒 Parc fermé' : '🔓 Parc ouvert';
+  pb.classList.toggle('closed', !!G.entranceClosed);
   document.querySelectorAll('.speed button').forEach(b => b.classList.toggle('active', UI.paused ? b.dataset.s === '0' : +b.dataset.s === UI.speed));
 }
 
@@ -156,6 +162,7 @@ export function openRideWindow(id) {
         <button data-f="open">Ouvrir</button><button data-f="close">Fermer</button>
       </div>
       <div class="row" data-f="buildrow"><button data-f="build" class="wide">🛠️ Continuer la construction</button></div>
+      <div class="row" data-f="gaterow"><button data-f="gin">🟩 Placer l'entrée</button><button data-f="gout">🟥 Placer la sortie</button></div>
       <div class="row price-row"><span>${isStall ? 'Prix de vente' : 'Prix du billet'}</span>
         <button data-f="pm">−</button><b data-f="price"></b><button data-f="pp">+</button></div>
       <div data-f="ratings" class="ratings"></div>
@@ -169,6 +176,8 @@ export function openRideWindow(id) {
     F.pp.onclick = () => { r.price = Math.min(30, Math.round((r.price + 0.5) * 2) / 2); };
     F.locate.onclick = () => centerOn(r.x + 0.5, r.y + 0.5);
     F.build.onclick = () => openBuilder(r);
+    F.gin.onclick = () => startGatePlacement(r, 'entrance');
+    F.gout.onclick = () => startGatePlacement(r, 'exit');
     F.demolish.onclick = () => {
       if (!confirm(`Démolir ${r.name} ? Vous récupérerez ${money(Math.round(r.value * 0.5))}.`)) return;
       if (UI.tool?.rideId === r.id) setTool(null);
@@ -181,6 +190,9 @@ export function openRideWindow(id) {
       F.status.textContent = st[0]; F.status.className = 'badge ' + st[1];
       F.price.textContent = money2(r.price);
       F.buildrow.style.display = r.kind === 'coaster' && !r.complete ? '' : 'none';
+      F.gaterow.style.display = isStall || (r.kind === 'coaster' && !r.complete) ? 'none' : '';
+      F.gin.textContent = r.entrance ? '🟩 Déplacer l\'entrée' : '🟩 Placer l\'entrée';
+      F.gout.textContent = r.exit ? '🟥 Déplacer la sortie' : '🟥 Placer la sortie';
       F.open.disabled = r.status === 'open'; F.close.disabled = r.status === 'closed' || r.status === 'building';
       if (r.ratings && !r.ratings.fail && !isStall) {
         const rt = r.ratings, lvl = v => v < 2 ? 'Faible' : v < 4 ? 'Moyenne' : v < 6 ? 'Élevée' : v < 8 ? 'Très élevée' : 'Extrême';
@@ -204,7 +216,11 @@ export function openRideWindow(id) {
           rows.push(['Durée', `${r.ratings.time.toFixed(0)} s`]);
         }
         rows.push(['Fiabilité', `${Math.round(r.reliability)} %`]);
-        if (!accessTiles(r).length) rows.push(['⚠️', '<span class="err">Aucun chemin ne mène à cette attraction</span>']);
+        if (!r.entrance || !r.exit) rows.push(['⚠️', '<span class="err">Placez l\'entrée et la sortie</span>']);
+        else {
+          if (!accessTiles(r).filter(i => r.entrance && Math.abs(i % G.w - r.entrance.x) + Math.abs(((i / G.w) | 0) - r.entrance.y) === 1).length && !queueConnected(r)) rows.push(['⚠️', '<span class="err">L\'entrée n\'est reliée à aucun chemin</span>']);
+          if (!accessTiles(r).filter(i => Math.abs(i % G.w - r.exit.x) + Math.abs(((i / G.w) | 0) - r.exit.y) === 1).length) rows.push(['⚠️', '<span class="err">La sortie n\'est reliée à aucun chemin</span>']);
+        }
       } else if (!accessTiles(r).length) rows.push(['⚠️', '<span class="err">Reliez la boutique à un chemin</span>']);
       rows.push([isStall ? 'Ventes' : 'Passagers', r.totalRiders]);
       rows.push(['Recette totale', money2(r.income)]);
@@ -261,8 +277,30 @@ export function buildPiece(r, type) {
     setTool(null);
     closeWin('builder');
     openRideWindow(r.id);
-    if (r.ratings && !r.ratings.fail) flash('Circuit terminé et testé !', false);
+    if (r.ratings && !r.ratings.fail) { flash('Circuit terminé ! Placez maintenant l\'entrée près de la gare.', false); startGatePlacement(r, 'entrance'); }
   }
+}
+
+function queueConnected(r) {
+  if (!r.entrance) return false;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const x = r.entrance.x + dx, y = r.entrance.y + dy;
+    if (x >= 0 && y >= 0 && x < G.w && y < G.h && G.path[y * G.w + x] === 2) return true;
+  }
+  return false;
+}
+
+// Outil de placement d'entrée / sortie
+export function startGatePlacement(r, gate) {
+  setTool({ kind: 'gate', rideId: r.id, gate });
+  closePalette();
+  UI.tool.kind = 'gate';
+}
+export function gatePlaced(r, gate) {
+  if (gate === 'entrance' && !r.exit) { startGatePlacement(r, 'exit'); flash('Entrée placée. Placez maintenant la sortie.', false); return; }
+  setTool(null);
+  openRideWindow(r.id);
+  flash(gate === 'entrance' ? 'Entrée placée' : 'Sortie placée. Reliez-les aux chemins puis ouvrez l\'attraction !', false);
 }
 
 // ---------- Fenêtre visiteur ----------
@@ -567,12 +605,17 @@ export function initUI() {
     <div class="stat click" data-w="park" title="Visiteurs"><span>👥</span><b data-f="guests"></b></div>
     <div class="stat click" data-w="park" title="Note du parc"><span>⭐</span><b data-f="rating"></b></div>
     <div class="stat" title="Date"><span>📅</span><b data-f="date"></b></div>
+    <button class="park-btn" data-f="parkbtn" title="Ouvrir / fermer le parc"></button>
     <div class="speed"><button data-s="0" title="Pause (Espace)">⏸</button><button data-s="1" title="Vitesse normale">▶</button><button data-s="2" title="Rapide">⏩</button><button data-s="4" title="Très rapide">⏭</button></div>
     <div class="menu-btns">
       <button data-w="park" title="Parc">🏞️</button><button data-w="rides" title="Attractions">🎠</button><button data-w="finances" title="Finances">📊</button>
       <button data-w="staff" title="Personnel">👷</button><button data-w="messages" title="Messages">✉️</button>
       <button data-w="save" title="Sauvegarder">💾</button><button data-w="menu" title="Menu principal">☰</button>
     </div>`;
+  $('#hud [data-f=parkbtn]').onclick = () => {
+    G.entranceClosed = !G.entranceClosed;
+    flash(G.entranceClosed ? 'Parc fermé aux nouveaux visiteurs' : 'Le parc est ouvert ! Les visiteurs arrivent.', !!G.entranceClosed);
+  };
   document.querySelectorAll('.speed button').forEach(b => b.onclick = () => { const s = +b.dataset.s; if (s === 0) UI.paused = !UI.paused; else { UI.speed = s; UI.paused = false; } });
   document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => ({
     park: openParkWindow, rides: openRidesList, finances: openFinances, staff: () => openStaffWindow(), messages: openMessages,

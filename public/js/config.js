@@ -111,3 +111,19 @@ export const SCENARIOS = [
     goal: null, seed: 3, sandbox: true,
   },
 ];
+
+// Montagnes russes prédéfinies : [pièce, nombre, lift à chaîne]
+export const DESIGNS = {
+  chenille: {
+    name: 'La Chenille', type: 'junior', icon: '🐛', desc: 'Petit circuit familial, idéal pour débuter',
+    seq: [['up', 3, 1], ['right', 2], ['down', 3], ['straight', 3], ['right', 2]],
+  },
+  tornade: {
+    name: 'La Tornade', type: 'steel', icon: '🌪️', desc: 'Lift raide de 15 m et longue descente rapide',
+    seq: [['steepUp', 5, 1], ['straight', 1], ['right', 2], ['steepDown', 3], ['down', 4], ['straight', 2], ['right', 2]],
+  },
+  grizzly: {
+    name: 'Le Grizzly', type: 'wooden', icon: '🐻', desc: 'Grand classique en bois avec virages et bosses',
+    seq: [['up', 6, 1], ['straight', 1], ['right', 1], ['straight', 1], ['right', 1], ['steepDown', 3], ['up', 2], ['down', 2], ['straight', 3], ['right', 1], ['straight', 1], ['right', 1]],
+  },
+};

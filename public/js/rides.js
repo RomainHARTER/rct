@@ -1,7 +1,7 @@
 // Placement et fonctionnement des attractions, boutiques, décor, chemins
 import { G, RT, idx, inB, invalidateFields, spend, canAfford, addMsg, rideById } from './state.js';
 import { RIDES, STALLS, SCENERY, FURNITURE, TERRAIN, PATH_COST, TERRAFORM_COST, COASTERS } from './config.js';
-import { adjacentPaths } from './path.js';
+import { adjacentPaths, isPath } from './path.js';
 import { STATION_PIECES, demolishCoaster, updateCoaster, pieceRange } from './coaster.js';
 
 export const defOf = r => r.kind === 'coaster' ? COASTERS[r.type] : (RIDES[r.type] || STALLS[r.type]);
@@ -13,9 +13,55 @@ export function footprint(r) {
   return out;
 }
 
+// Tuiles de chemin normal par lesquelles on rejoint / quitte l'attraction
 export function accessTiles(r) {
   if (r.kind === 'coaster' && r.pieces.length < STATION_PIECES) return [];
-  return adjacentPaths(footprint(r));
+  if (r.kind === 'stall') return adjacentPaths(footprint(r));
+  const t = [];
+  if (r.exit) t.push([r.exit.x, r.exit.y]);
+  if (r.entrance) t.push([r.entrance.x, r.entrance.y]);
+  return adjacentPaths(t);
+}
+export function exitTiles(r) {
+  if (r.kind === 'stall' || !r.exit) return accessTiles(r);
+  return adjacentPaths([[r.exit.x, r.exit.y]]);
+}
+
+// ---------- Entrées / sorties d'attraction ----------
+export function isGate(i) { return !!RT.gate?.[i]; }
+export function gateAt(x, y) { return inB(x, y) ? RT.gate[idx(x, y)] || null : null; }
+
+export function canPlaceGate(r, x, y) {
+  if (!inB(x, y)) return 'Hors limites';
+  const i = idx(x, y);
+  const own = footprint(r);
+  if (!own.some(([fx, fy]) => Math.abs(fx - x) + Math.abs(fy - y) === 1)) return r.kind === 'coaster' ? 'Doit toucher la gare' : 'Doit toucher l\'attraction';
+  if (G.entrance.x === x && G.entrance.y === y) return 'Entrée du parc';
+  const g = RT.gate[i];
+  if (g && g.ride !== r) return 'Déjà une entrée/sortie ici';
+  if (G.path[i]) return 'Un chemin occupe cet emplacement (démolissez-le)';
+  if (RT.obj[i]) return 'Emplacement occupé';
+  if (lowTrack(i)) return 'Une voie passe ici';
+  if (G.terrain[i] === TERRAIN.WATER) return 'Impossible sur l\'eau';
+  return null;
+}
+
+export function placeGate(r, kind, x, y) {
+  const err = canPlaceGate(r, x, y);
+  if (err) return err;
+  const i = idx(x, y);
+  const other = kind === 'entrance' ? 'exit' : 'entrance';
+  if (r[other] && r[other].x === x && r[other].y === y) r[other] = null;
+  if (r[kind]) RT.gate[idx(r[kind].x, r[kind].y)] = null;
+  r[kind] = { x, y };
+  RT.gate[i] = { ride: r, kind };
+  G.scen[i] = null;
+  invalidateFields();
+  return null;
+}
+
+function removeGates(r) {
+  for (const k of ['entrance', 'exit']) if (r[k]) { RT.gate[idx(r[k].x, r[k].y)] = null; }
 }
 
 function lowTrack(i, minClear = 3) {
@@ -33,7 +79,7 @@ export function canPlaceRide(type, x, y) {
     const i = idx(tx, ty);
     if (G.entrance.x === tx && G.entrance.y === ty) return 'Entrée du parc';
     if (G.path[i]) return 'Un chemin occupe cet emplacement';
-    if (RT.obj[i]) return 'Emplacement occupé';
+    if (RT.obj[i] || RT.gate[i]) return 'Emplacement occupé';
     if (RT.track[i]?.length) return 'Une voie occupe cet emplacement';
     if (G.terrain[i] === TERRAIN.WATER) return 'Impossible de construire sur l\'eau';
   }
@@ -48,7 +94,7 @@ export function placeRide(type, x, y) {
   const r = {
     id: G.nextId++, kind: def.kind, type, name: `${def.name} ${count}`,
     x, y, size: def.size, status: def.kind === 'stall' ? 'open' : 'closed', price: def.price,
-    queue: [], riders: [], phase: 'loading', timer: 0, anim: 0,
+    queue: [], riders: [], phase: 'loading', entrance: null, exit: null, timer: 0, anim: 0,
     reliability: 100, age: 0, totalRiders: 0, income: 0, monthIncome: 0, lastMonthIncome: 0,
     value: def.cost, breakdownTimer: 0, sales: 0,
     ratings: def.kind === 'ride' ? { exc: def.exc, int: def.int, nau: def.nau } : null,
@@ -66,6 +112,7 @@ export function placeRide(type, x, y) {
 
 export function demolishRide(r, hooks) {
   hooks.evict(r);
+  removeGates(r);
   if (r.kind === 'coaster') demolishCoaster(r);
   else for (const [x, y] of footprint(r)) RT.obj[idx(x, y)] = 0;
   G.rides = G.rides.filter(q => q !== r);
@@ -76,6 +123,7 @@ export function demolishRide(r, hooks) {
 export function setRideStatus(r, status, hooks) {
   if (r.kind === 'coaster' && (!r.complete || r.ratings?.fail) && status === 'open') return 'Le circuit doit être terminé et testé';
   if (r.status === 'broken') return 'L\'attraction est en panne, un mécanicien doit la réparer';
+  if (status === 'open' && r.kind !== 'stall' && (!r.entrance || !r.exit)) return 'Placez d\'abord l\'entrée et la sortie de l\'attraction';
   r.status = status;
   if (status === 'closed') hooks.evictQueue(r, 'L\'attraction a fermé…');
   invalidateFields();
@@ -83,22 +131,25 @@ export function setRideStatus(r, status, hooks) {
 }
 
 // ---------- Chemins, décor, mobilier, terrain ----------
-export function canPath(x, y) {
+export const QUEUE_COST = 12;
+export function canPath(x, y, kind = 1) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
-  if (G.path[i]) return 'Déjà un chemin';
+  if (G.path[i] === kind) return 'Déjà un chemin';
+  if (G.entrance.x === x && G.entrance.y === y) return 'Entrée du parc';
+  if (RT.gate[i]) return 'Entrée/sortie d\'attraction';
   if (G.terrain[i] === TERRAIN.WATER) return 'Impossible sur l\'eau';
   if (RT.obj[i]) return 'Emplacement occupé';
   if (lowTrack(i)) return 'Une voie trop basse passe ici';
-  if (!canAfford(PATH_COST)) return 'Fonds insuffisants';
+  if (!canAfford(kind === 2 ? QUEUE_COST : PATH_COST)) return 'Fonds insuffisants';
   return null;
 }
-export function placePath(x, y) {
-  const err = canPath(x, y);
+export function placePath(x, y, kind = 1) {
+  const err = canPath(x, y, kind);
   if (err) return err;
   const i = idx(x, y);
-  G.path[i] = 1; G.scen[i] = null;
-  spend('construction', PATH_COST);
+  G.path[i] = kind; G.scen[i] = null; G.furn[i] = kind === 2 ? null : G.furn[i];
+  spend('construction', kind === 2 ? QUEUE_COST : PATH_COST);
   invalidateFields();
   return null;
 }
@@ -106,7 +157,7 @@ export function placePath(x, y) {
 export function canScenery(type, x, y) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
-  if (G.path[i] || RT.obj[i]) return 'Emplacement occupé';
+  if (G.path[i] || RT.obj[i] || RT.gate[i]) return 'Emplacement occupé';
   if (G.scen[i]) return 'Déjà du décor ici';
   if (lowTrack(i, 4)) return 'Une voie passe trop bas';
   if (G.terrain[i] === TERRAIN.WATER) return 'Impossible sur l\'eau';
@@ -124,7 +175,7 @@ export function placeScenery(type, x, y) {
 export function canFurniture(type, x, y) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
-  if (!G.path[i]) return 'À placer sur un chemin';
+  if (G.path[i] !== 1) return 'À placer sur un chemin normal';
   if (G.furn[i]) return 'Déjà occupé';
   if (G.entrance.x === x && G.entrance.y === y) return 'Entrée du parc';
   if (!canAfford(FURNITURE[type].cost)) return 'Fonds insuffisants';
@@ -142,7 +193,7 @@ export function placeFurniture(type, x, y) {
 export function canTerraform(mode, x, y) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
-  if (G.path[i] || RT.obj[i] || RT.track[i]?.length || G.scen[i]) return 'Libérez d\'abord la tuile';
+  if (G.path[i] || RT.obj[i] || RT.gate[i] || RT.track[i]?.length || G.scen[i]) return 'Libérez d\'abord la tuile';
   if (G.entrance.x === x && G.entrance.y === y) return 'Entrée du parc';
   if (mode === 'water' && G.terrain[i] === TERRAIN.WATER) return 'Déjà de l\'eau';
   if (mode !== 'water' && G.terrain[i] === (mode === 'sand' ? TERRAIN.SAND : TERRAIN.GRASS)) return 'Rien à changer';
@@ -161,6 +212,13 @@ export function terraform(mode, x, y) {
 export function demolishAt(x, y, hooks) {
   if (!inB(x, y)) return 'Hors limites';
   const i = idx(x, y);
+  if (RT.gate[i]) {
+    const { ride, kind } = RT.gate[i];
+    RT.gate[i] = null; ride[kind] = null;
+    if (ride.status === 'open') { ride.status = 'closed'; hooks.evictQueue(ride, `${ride.name} a fermé`); }
+    invalidateFields();
+    return null;
+  }
   if (RT.obj[i]) { const r = rideById(RT.obj[i]); demolishRide(r, hooks); return null; }
   if (RT.track[i]?.length) { const r = RT.track[i][0].ride; demolishRide(r, hooks); return null; }
   if (G.furn[i]) { G.furn[i] = null; invalidateFields(); return null; }

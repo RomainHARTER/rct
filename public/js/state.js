@@ -73,6 +73,7 @@ export function newGame(scenarioId) {
     messages: [],
     stats: { totalGuests: 0, guestsLeft: 0 },
     goalState: scn.goal ? 'running' : 'none',
+    entranceClosed: true,
     entrance: { x: Math.floor(n / 2), y: n - 1 },
   });
 
@@ -103,6 +104,7 @@ export function newGame(scenarioId) {
   G.scenarioData = { name: scn.name, goal: scn.goal };
   rebuildIndexes();
   addMsg(`Bienvenue à ${G.parkName} ! Scénario : ${scn.name}.`);
+  addMsg('Le parc est fermé : construisez vos premières attractions, puis ouvrez-le avec le bouton 🔒 en haut.', null, 'warn');
   if (scn.goal) addMsg(`Objectif : ${scn.goal.guests} visiteurs et une note de ${scn.goal.rating} avant la fin de l'année ${scn.goal.year}.`);
   emit('newgame');
 }
@@ -110,7 +112,9 @@ export function newGame(scenarioId) {
 export function rebuildIndexes() {
   RT.track = new Array(G.w * G.h);
   RT.obj = new Int32Array(G.w * G.h);
+  RT.gate = new Array(G.w * G.h).fill(null);
   for (const r of G.rides) {
+    for (const k of ['entrance', 'exit']) if (r[k]) RT.gate[idx(r[k].x, r[k].y)] = { ride: r, kind: k };
     if (r.kind === 'coaster') {
       r.pieces.forEach((p, k) => addTrackRef(r, k));
     } else {

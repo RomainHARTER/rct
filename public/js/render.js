@@ -1,8 +1,9 @@
 // Rendu isométrique sur canvas (graphismes 100 % procéduraux)
 import { G, RT, idx, inB, rideById } from './state.js';
 import { TW, TH, ZH, TERRAIN, COASTERS, RIDES, STALLS, DX, DY, STAFF, TILE_M, H_M } from './config.js';
-import { piecePoint, carPositions, previewPiece, canAppend, stationTiles, canStartCoaster, STATION_PIECES } from './coaster.js';
-import { canPlaceRide, canPath, canScenery, canFurniture, canTerraform } from './rides.js';
+import { piecePoint, carPositions, previewPiece, canAppend, stationTiles, canStartCoaster, STATION_PIECES, designPieces, canPlaceDesign } from './coaster.js';
+import { DESIGNS } from './config.js';
+import { canPlaceRide, canPath, canScenery, canFurniture, canTerraform, canPlaceGate, footprint } from './rides.js';
 import { UI } from './uistate.js';
 
 export const cam = { x: 0, y: 0, zoom: 1 };
@@ -129,7 +130,7 @@ function pathRects(x, y, w) {
   const out = [[x + a, y + a, x + b, y + b]];
   for (let d = 0; d < 4; d++) {
     const nx = x + DX[d], ny = y + DY[d];
-    if (!(inB(nx, ny) && G.path[idx(nx, ny)]) && !(d === 1 && x === G.entrance.x && y === G.entrance.y)) continue;
+    if (!(inB(nx, ny) && (G.path[idx(nx, ny)] || RT.gate[idx(nx, ny)])) && !(d === 1 && x === G.entrance.x && y === G.entrance.y)) continue;
     if (d === 0) out.push([x + 0.5, y + a, x + 1, y + b]);
     if (d === 1) out.push([x + a, y + 0.5, x + b, y + 1]);
     if (d === 2) out.push([x, y + a, x + 0.5, y + b]);
@@ -138,9 +139,11 @@ function pathRects(x, y, w) {
   return out;
 }
 function drawPath(x, y) {
-  for (const [a, b, c, d] of pathRects(x, y, 0.84)) poly([[a, b], [c, b], [c, d], [a, d]], '#8d8577');
-  for (const [a, b, c, d] of pathRects(x, y, 0.7)) poly([[a, b], [c, b], [c, d], [a, d]], '#b9b0a0');
   const i = idx(x, y);
+  const q = G.path[i] === 2;
+  for (const [a, b, c, d] of pathRects(x, y, q ? 0.74 : 0.84)) poly([[a, b], [c, b], [c, d], [a, d]], q ? '#3f5f86' : '#8d8577');
+  for (const [a, b, c, d] of pathRects(x, y, q ? 0.6 : 0.7)) poly([[a, b], [c, b], [c, d], [a, d]], q ? '#86a9d4' : '#b9b0a0');
+  if (q) for (const [a, b, c, d] of pathRects(x, y, 0.08)) poly([[a, b], [c, b], [c, d], [a, d]], 'rgba(255,255,255,0.55)');
   // déchets et vomi
   for (let k = 0; k < G.litter[i]; k++) {
     const h1 = hash(x * 7 + k, y * 3 - k), h2 = hash(y * 5 + k, x * 11 + k);
@@ -441,6 +444,17 @@ function drawStall(r, def) {
   if (r.status === 'closed') { ctx.font = 'bold 10px sans-serif'; ctx.fillStyle = '#c0392b'; ctx.fillText('FERMÉ', ix(x + 0.5, y + 0.5), iy(x + 0.5, y + 0.5, 1)); }
 }
 
+function drawGate(x, y, kind, alpha = 1) {
+  ctx.globalAlpha = alpha;
+  const col = kind === 'entrance' ? '#27ae60' : '#c0392b';
+  poly([[x + 0.08, y + 0.08], [x + 0.92, y + 0.08], [x + 0.92, y + 0.92], [x + 0.08, y + 0.92]], '#cfc6b4', shade(col, 0.7));
+  for (const [a, b] of [[0.18, 0.18], [0.82, 0.18], [0.18, 0.82], [0.82, 0.82]]) box(x + a - 0.05, y + b - 0.05, x + a + 0.05, y + b + 0.05, 0, 2.2, '#d5d8dc');
+  box(x + 0.1, y + 0.1, x + 0.9, y + 0.9, 2.2, 2.6, col);
+  ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+  ctx.fillText(kind === 'entrance' ? 'ENTRÉE' : 'SORTIE', ix(x + 0.5, y + 0.5), iy(x + 0.5, y + 0.5, 2.6) - 3);
+  ctx.globalAlpha = 1;
+}
+
 function drawEntrance() {
   const e = G.entrance, x = e.x, y = e.y;
   for (const [a] of [[0.02], [0.98]]) box(x + a - 0.07, y + 0.4, x + a + 0.07, y + 0.6, 0, 4, '#c0392b');
@@ -485,6 +499,30 @@ function drawPreview(items) {
       items.push({ d: x + y + def.size, f: () => drawRide({ type: t.type, x, y, spin: now, anim: 0.5, phase: 'running', timer: 0, status: 'open' }, 0.55, true) });
       break;
     }
+    case 'gate': {
+      const r = rideById(t.rideId);
+      if (!r) break;
+      for (const [fx, fy] of footprint(r)) for (let d = 0; d < 4; d++) {
+        const sx = fx + DX[d], sy = fy + DY[d];
+        if (!canPlaceGate(r, sx, sy)) tileOutline(sx, sy, 'rgba(255,255,255,0.45)', 'rgba(255,255,255,0.08)');
+      }
+      const err = canPlaceGate(r, h.x, h.y);
+      tileOutline(h.x, h.y, ok(err), okF(err));
+      if (!err) items.push({ d: h.x + h.y + 1, f: () => drawGate(h.x, h.y, t.gate, 0.6) });
+      break;
+    }
+    case 'design': {
+      const def = DESIGNS[t.key];
+      const pieces = designPieces(t.key, h.x, h.y, t.dir);
+      const err = canPlaceDesign(t.key, h.x, h.y, t.dir);
+      const fake = { type: def.type };
+      for (const p of pieces) {
+        if (!inB(p.x, p.y)) continue;
+        tileOutline(p.x, p.y, ok(err), okF(err));
+        items.push({ d: p.x + p.y + 1 + p.h * 0.01, f: () => drawPiece(fake, p, 0.6, err ? '#e74c3c' : null) });
+      }
+      break;
+    }
     case 'coasterStart': {
       const tiles = stationTiles(h.x, h.y, t.dir);
       const err = canStartCoaster(t.type, h.x, h.y, t.dir);
@@ -495,7 +533,7 @@ function drawPreview(items) {
       break;
     }
     case 'path': {
-      const err = canPath(h.x, h.y);
+      const err = canPath(h.x, h.y, t.queue ? 2 : 1);
       tileOutline(h.x, h.y, ok(err), okF(err));
       break;
     }
@@ -537,6 +575,7 @@ export function render(time) {
     const i = idx(x, y);
     if (G.scen[i]) { const s = G.scen[i]; items.push({ d: x + y + 1, f: () => drawScenery(s, x, y) }); }
     if (G.furn[i]) { const f = G.furn[i]; items.push({ d: x + y + 0.9, f: () => drawFurniture(f, x, y) }); }
+    if (RT.gate[i]) { const k = RT.gate[i].kind; items.push({ d: x + y + 1, f: () => drawGate(x, y, k) }); }
     const tr = RT.track[i];
     if (tr) for (const t of tr) { const p = t.ride.pieces[t.k]; const r = t.ride; items.push({ d: x + y + 1 + p.h * 0.01, f: () => drawPiece(r, p) }); }
   }

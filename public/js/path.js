@@ -2,7 +2,8 @@
 import { G, RT, idx, inB } from './state.js';
 import { DX, DY } from './config.js';
 
-export const isPath = (x, y) => inB(x, y) && G.path[idx(x, y)] === 1;
+export const isPath = (x, y) => inB(x, y) && G.path[idx(x, y)] === 1;      // chemin normal
+export const isQueue = (x, y) => inB(x, y) && G.path[idx(x, y)] === 2;     // file d'attente
 
 export function getField(key, sourcesFn) {
   let f = RT.fields.get(key);
@@ -18,7 +19,7 @@ function bfs(sources) {
   const q = new Int32Array(n);
   let head = 0, tail = 0;
   for (const i of sources) {
-    if (dist[i] === -1 && G.path[i]) { dist[i] = 0; q[tail++] = i; }
+    if (dist[i] === -1 && G.path[i] === 1) { dist[i] = 0; q[tail++] = i; }
   }
   while (head < tail) {
     const i = q[head++];
@@ -27,7 +28,7 @@ function bfs(sources) {
       const nx = x + DX[d], ny = y + DY[d];
       if (!inB(nx, ny)) continue;
       const j = ny * G.w + nx;
-      if (dist[j] !== -1 || !G.path[j]) continue;
+      if (dist[j] !== -1 || G.path[j] !== 1) continue;
       dist[j] = dist[i] + 1;
       q[tail++] = j;
     }
@@ -71,4 +72,28 @@ export function adjacentPaths(tiles) {
     }
   }
   return [...set];
+}
+
+// Champ vers l'entrée d'une attraction : depuis l'entrée on traverse la file d'attente
+// puis les chemins normaux, mais un chemin normal ne mène jamais dans une file.
+export function rideFieldFrom(entranceIdx) {
+  const n = G.w * G.h;
+  const dist = new Int16Array(n).fill(-1);
+  const q = new Int32Array(n);
+  let head = 0, tail = 0;
+  dist[entranceIdx] = 0; q[tail++] = entranceIdx;
+  while (head < tail) {
+    const i = q[head++];
+    const x = i % G.w, y = (i / G.w) | 0;
+    const fromNormal = G.path[i] === 1;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + DX[d], ny = y + DY[d];
+      if (!inB(nx, ny)) continue;
+      const j = ny * G.w + nx;
+      if (dist[j] !== -1) continue;
+      const pj = G.path[j];
+      if (pj === 1 || (pj === 2 && !fromNormal)) { dist[j] = dist[i] + 1; q[tail++] = j; }
+    }
+  }
+  return dist;
 }

@@ -1,6 +1,6 @@
 // Montagnes russes : géométrie du circuit, construction, physique, notes
 import { G, RT, idx, inB, addTrackRef, removeTrackRef, invalidateFields, spend, canAfford, addMsg } from './state.js';
-import { COASTERS, PIECES, DX, DY, TILE_M, H_M, G_ACC, TERRAIN } from './config.js';
+import { COASTERS, PIECES, DESIGNS, DX, DY, TILE_M, H_M, G_ACC, TERRAIN } from './config.js';
 
 export const STATION_PIECES = 3;
 const CAR_SP = 2.6;          // espacement des wagons (m)
@@ -88,6 +88,7 @@ export function checkPiece(r, p) {
   if (hi > def.maxH) return `Hauteur maximale atteinte (${def.maxH})`;
   if (G.entrance.x === p.x && G.entrance.y === p.y) return 'Entrée du parc';
   if (RT.obj[i]) return 'Une attraction occupe cet emplacement';
+  if (RT.gate[i] && lo < CLEARANCE) return 'Une entrée/sortie d\'attraction est ici';
   if (G.terrain[i] === TERRAIN.WATER && lo < 1) return 'Il faut surélever la voie au-dessus de l\'eau';
   if (G.path[i] && lo < CLEARANCE) return 'Un chemin est en dessous (hauteur 3 minimum)';
   for (const t of RT.track[i] || []) {
@@ -127,7 +128,7 @@ export function createCoaster(type, x, y, dir) {
   const r = {
     id: G.nextId++, kind: 'coaster', type, name: `${def.name} ${count}`,
     x, y, size: 1, status: 'building', price: def.price, queue: [],
-    pieces: [], start: { x, y, dir }, cursor: { x, y, h: 0, dir },
+    pieces: [], start: { x, y, dir }, cursor: { x, y, h: 0, dir }, entrance: null, exit: null,
     complete: false, ratings: null, reliability: 100, age: 0,
     totalRiders: 0, income: 0, monthIncome: 0, lastMonthIncome: 0, value: 0,
     train: null, color: def.color, chainMode: false, breakdownTimer: 0,
@@ -345,4 +346,52 @@ export function carPositions(r) {
 
 export function demolishCoaster(r) {
   r.pieces.forEach((p, k) => removeTrackRef(r, k));
+}
+
+// ---------- Modèles prédéfinis ----------
+export function designPieces(key, x, y, dir) {
+  const d = DESIGNS[key];
+  const out = [];
+  let c = { x, y, h: 0, dir };
+  for (let k = 0; k < STATION_PIECES; k++) { out.push(makePiece('station', c)); c = nextCursor('station', c); }
+  for (const [type, n, chain] of d.seq) for (let k = 0; k < n; k++) { out.push(makePiece(type, c, !!chain)); c = nextCursor(type, c); }
+  return out;
+}
+export function designCost(key) {
+  const d = DESIGNS[key], def = COASTERS[d.type];
+  const n = d.seq.reduce((s, [, k]) => s + k, 0);
+  return def.stationCost * STATION_PIECES + def.pieceCost * n;
+}
+export function canPlaceDesign(key, x, y, dir) {
+  const d = DESIGNS[key];
+  if (!canAfford(designCost(key))) return 'Fonds insuffisants';
+  const pieces = designPieces(key, x, y, dir);
+  const fake = { type: d.type, pieces: [] };
+  for (let k = 0; k < pieces.length; k++) {
+    const p = pieces[k];
+    const err = checkPiece(fake, p);
+    if (err) return err;
+    const [lo, hi] = pieceRange(p);
+    for (let j = 0; j < k; j++) {
+      const q = pieces[j];
+      if (q.x !== p.x || q.y !== p.y) continue;
+      const [qlo, qhi] = pieceRange(q);
+      if (!(lo >= qhi + CLEARANCE || hi + CLEARANCE <= qlo)) return 'Le circuit se croise';
+    }
+  }
+  return null;
+}
+export function placeDesign(key, x, y, dir) {
+  const err = canPlaceDesign(key, x, y, dir);
+  if (err) return { err };
+  const d = DESIGNS[key];
+  const { ride, err: e2 } = createCoaster(d.type, x, y, dir);
+  if (e2) return { err: e2 };
+  ride.name = d.name;
+  for (const [type, n, chain] of d.seq) {
+    ride.chainMode = !!chain;
+    for (let k = 0; k < n; k++) { const e = appendPiece(ride, type); if (e) return { err: e, ride }; }
+  }
+  ride.chainMode = false;
+  return { ride };
 }

@@ -3,10 +3,10 @@ import { G, rideById, inB } from './state.js';
 import { RIDES, STALLS, PIECES } from './config.js';
 import { UI } from './uistate.js';
 import { cam, screenToTile, pickAt } from './render.js';
-import { placeRide, placePath, placeScenery, placeFurniture, terraform, demolishAt } from './rides.js';
-import { createCoaster, removeLastPiece } from './coaster.js';
+import { placeRide, placePath, placeScenery, placeFurniture, terraform, demolishAt, placeGate } from './rides.js';
+import { createCoaster, removeLastPiece, placeDesign } from './coaster.js';
 import { hooks } from './guests.js';
-import { flash, setTool, openRideWindow, openGuestWindow, openStaffWindow, openBuilder, buildPiece, closeAllWins } from './ui.js';
+import { flash, setTool, openRideWindow, openGuestWindow, openStaffWindow, openBuilder, buildPiece, closeAllWins, startGatePlacement, gatePlaced } from './ui.js';
 
 const keys = new Set();
 let drag = null;     // { mode: 'pan'|'paint', sx, sy, cx, cy, moved }
@@ -18,7 +18,7 @@ function applyTool(x, y, painting = false) {
   if (!t) return;
   let err = null;
   switch (t.kind) {
-    case 'path': err = placePath(x, y); if (painting && err) err = null; break;
+    case 'path': err = placePath(x, y, t.queue ? 2 : 1); if (painting && err) err = null; break;
     case 'furn': err = placeFurniture(t.type, x, y); break;
     case 'scenery': err = placeScenery(t.type, x, y); if (painting && err) err = null; break;
     case 'terraform': err = terraform(t.mode, x, y); if (painting && err) err = null; break;
@@ -28,7 +28,20 @@ function applyTool(x, y, painting = false) {
       const ox = x - Math.floor((def.size - 1) / 2), oy = y - Math.floor((def.size - 1) / 2);
       const res = placeRide(t.type, ox, oy);
       if (res.err) err = res.err;
-      else if (def.kind === 'ride') { setTool(null); openRideWindow(res.ride.id); flash(`${def.name} construit ! Reliez-le à un chemin puis ouvrez-le.`, false); }
+      else if (def.kind === 'ride') { openRideWindow(res.ride.id); startGatePlacement(res.ride, 'entrance'); flash(`${def.name} construit ! Placez son entrée (case verte) contre l'attraction.`, false); }
+      break;
+    }
+    case 'gate': {
+      const r = rideById(t.rideId);
+      if (!r) { setTool(null); break; }
+      err = placeGate(r, t.gate, x, y);
+      if (!err) gatePlaced(r, t.gate);
+      break;
+    }
+    case 'design': {
+      const res = placeDesign(t.key, x, y, t.dir);
+      if (res.err) err = res.err;
+      else if (res.ride.ratings && !res.ride.ratings.fail) { openRideWindow(res.ride.id); startGatePlacement(res.ride, 'entrance'); flash(`${res.ride.name} construit ! Placez l'entrée contre la gare.`, false); }
       break;
     }
     case 'coasterStart': {
@@ -124,7 +137,7 @@ export function initInput(canvas) {
     const t = UI.tool;
     if (e.key === 'Escape') { if (t) setTool(null); else closeAllWins(); UI.selected = null; }
     if (e.key === ' ') { UI.paused = !UI.paused; e.preventDefault(); }
-    if (e.key.toLowerCase() === 'r' && t?.kind === 'coasterStart') t.dir = (t.dir + 1) % 4;
+    if (e.key.toLowerCase() === 'r' && (t?.kind === 'coasterStart' || t?.kind === 'design')) t.dir = (t.dir + 1) % 4;
     if (t?.kind === 'coasterBuild') {
       const r = rideById(t.rideId);
       if (!r) return;

@@ -1,8 +1,8 @@
 // Visiteurs : besoins, décisions, déplacements, files d'attente
 import { G, RT, idx, inB, spend, rideById, invalidateFields } from './state.js';
 import { FIRST_NAMES, SHIRTS, SKINS, SCENERY, STALLS, DX, DY } from './config.js';
-import { getField, stepToward, pathNeighbors, isPath } from './path.js';
-import { accessTiles, defOf } from './rides.js';
+import { getField, stepToward, pathNeighbors, isPath, rideFieldFrom } from './path.js';
+import { accessTiles, exitTiles, defOf } from './rides.js';
 
 const SPEED = 1.15; // tuiles / seconde
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -17,7 +17,52 @@ export function thought(g, text) {
 
 // ---------- Champs de destination ----------
 export function rideField(r) {
-  return getField('ride:' + r.id, () => accessTiles(r));
+  if (r.kind === 'stall') return getField('ride:' + r.id, () => accessTiles(r));
+  if (!r.entrance) { const f = getField('none', () => []); return f; }
+  const key = 'ride:' + r.id;
+  let f = RT.fields.get(key);
+  if (!f) { f = rideFieldFrom(idx(r.entrance.x, r.entrance.y)); RT.fields.set(key, f); }
+  return f;
+}
+
+// Tracé de la file d'attente : entrée puis tuiles de file reliées
+function queueLine(r) {
+  const key = 'qline:' + r.id;
+  let line = RT.fields.get(key);
+  if (line) return line;
+  line = [];
+  if (r.entrance) {
+    let x = r.entrance.x, y = r.entrance.y;
+    const seen = new Set([idx(x, y)]);
+    line.push([x + 0.5, y + 0.5]);
+    for (;;) {
+      let nxt = null;
+      for (let d = 0; d < 4 && !nxt; d++) {
+        const nx = x + DX[d], ny = y + DY[d];
+        if (inB(nx, ny) && G.path[idx(nx, ny)] === 2 && !seen.has(idx(nx, ny))) nxt = [nx, ny];
+      }
+      if (!nxt) break;
+      [x, y] = nxt; seen.add(idx(x, y)); line.push([x + 0.5, y + 0.5]);
+    }
+  }
+  RT.fields.set(key, line);
+  return line;
+}
+function pointOnLine(line, dist) {
+  for (let k = 1; k < line.length; k++) {
+    const [ax, ay] = line[k - 1], [bx, by] = line[k];
+    const l = Math.hypot(bx - ax, by - ay);
+    if (dist <= l) return [ax + (bx - ax) * dist / l, ay + (by - ay) * dist / l, false];
+    dist -= l;
+  }
+  const e = line[line.length - 1];
+  return [e[0], e[1], true];
+}
+
+function leaveQueue(g) {
+  g.state = 'walk'; g.goal = null;
+  const q = g.qret || G.entrance;
+  g.tx = g.nx = g.px = q.x; g.ty = g.ny = g.py = q.y;
 }
 export function needField(need) {
   return getField('need:' + need, () => {
@@ -152,7 +197,7 @@ function arrive(g) {
     g.goal = null;
     if (!r || r.status !== 'open') return;
     if (r.queue.length >= 40) { thought(g, `La file pour ${r.name} est trop longue`); return; }
-    g.state = 'queue'; g.timer = 0; g.rideId = r.id; g.qx = g.tx; g.qy = g.ty;
+    g.state = 'queue'; g.timer = 0; g.rideId = r.id; g.qret = { x: g.tx, y: g.ty };
     r.queue.push(g.id);
     return;
   }
@@ -218,12 +263,13 @@ export const hooks = {
     }
   },
   release(r, ids) {
-    const exits = accessTiles(r);
+    const exits = exitTiles(r);
     const m = guestMap();
     for (const id of ids) {
       const g = m.get(id);
       if (!g) continue;
       placeAt(g, exits);
+      if (r.exit && exits.length) { g.x = r.exit.x + 0.5; g.y = r.exit.y + 0.5; } // sort par la sortie
       g.state = 'walk'; g.goal = null; g.decide = rnd(1, 3);
       g.rides[r.id] = (g.rides[r.id] || 0) + 1;
       const rt = r.ratings || { exc: 1, int: 1, nau: 1 };
@@ -243,7 +289,7 @@ export const hooks = {
     const m = guestMap();
     for (const id of r.queue) {
       const g = m.get(id);
-      if (g && g.state === 'queue') { g.state = 'walk'; g.goal = null; g.happy = clamp(g.happy - 5); thought(g, msg); }
+      if (g && g.state === 'queue') { leaveQueue(g); g.happy = clamp(g.happy - 5); thought(g, msg); }
     }
     r.queue = [];
   },
@@ -256,7 +302,7 @@ export const hooks = {
     const m = guestMap();
     for (const id of riders.splice(0)) {
       const g = m.get(id);
-      if (g) { placeAt(g, accessTiles(r)); g.state = 'walk'; g.goal = null; }
+      if (g) { placeAt(g, exitTiles(r)); g.state = 'walk'; g.goal = null; }
     }
   },
 };
@@ -302,14 +348,20 @@ function updateGuest(g, dt, envTick) {
     case 'queue': {
       g.timer += dt;
       const r = rideById(g.rideId);
-      if (!r || r.status !== 'open') { g.state = 'walk'; break; }
+      if (!r || r.status !== 'open') { leaveQueue(g); break; }
       const pos = r.queue.indexOf(g.id);
-      const a = pos * 0.9;
-      g.x = g.qx + 0.5 + Math.cos(a) * Math.min(0.4, pos * 0.04) * 1 + g.ox * 0.6;
-      g.y = g.qy + 0.5 + Math.sin(a) * Math.min(0.4, pos * 0.04) + g.oy * 0.6;
+      const line = queueLine(r);
+      let tx, ty;
+      if (line.length) {
+        const [px, py, end] = pointOnLine(line, 0.55 + pos * 0.38);
+        tx = px + g.ox * 0.35; ty = py + g.oy * 0.35;
+        if (end && g.qret) { tx = px + (g.qret.x + 0.5 - px) * 0.45 + g.ox; ty = py + (g.qret.y + 0.5 - py) * 0.45 + g.oy; }
+      } else { tx = g.x; ty = g.y; }
+      const k = Math.min(1, dt * 3);
+      g.x += (tx - g.x) * k; g.y += (ty - g.y) * k;
       if (g.timer > 150) {
         r.queue = r.queue.filter(id => id !== g.id);
-        g.state = 'walk'; g.happy = clamp(g.happy - 15);
+        leaveQueue(g); g.happy = clamp(g.happy - 15);
         thought(g, `J'attends depuis trop longtemps pour ${r.name}`);
       } else if (g.timer > 60 && envTick) g.happy = clamp(g.happy - 1);
       return;
@@ -373,7 +425,8 @@ function chooseNext(g) {
     } else {
       if (f[here] === 0) { arrive(g); if (g.state !== 'walk') return; }
       const n = g.goal ? stepToward(fieldForGoal(g.goal), g.tx, g.ty) : null;
-      if (n) { g.nx = n[0]; g.ny = n[1]; return; }
+      if (n && g.goal.type === 'ride' && (G.path[idx(n[0], n[1])] === 2 || RT.gate[idx(n[0], n[1])])) { arrive(g); if (g.state !== 'walk') return; }
+      else if (n) { g.nx = n[0]; g.ny = n[1]; return; }
     }
   }
   const nb = pathNeighbors(g.tx, g.ty);

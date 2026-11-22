@@ -25,7 +25,10 @@ Sur un hébergement mutualisé, il suffit de copier le dossier `public/` à la r
 ## Fonctionnalités
 
 - **Carte isométrique** générée par scénario (herbe, sable, lacs, forêts), zoom et déplacement.
+- **Parc fermé au démarrage** : construisez tranquillement, puis ouvrez-le avec le bouton 🔒 de la barre du haut.
 - **Chemins** tracés au cliqué-glissé, avec bancs, poubelles et lampadaires.
+- **Entrées / sorties d'attraction et files d'attente** : chaque manège et chaque montagne russe a une entrée (verte) et une sortie (rouge) à placer contre l'attraction ou sa gare. Les files d'attente (chemin bleu) relient l'entrée au réseau : les visiteurs y font la queue, et les promeneurs ne les empruntent pas.
+- **3 montagnes russes prédéfinies**, prêtes à poser en un clic (R pour pivoter) : La Chenille (junior), La Tornade (acier), Le Grizzly (bois).
 - **7 manèges animés** : carrousel, grande roue, bateau balançoire, autos tamponneuses, tasses, tour de chute, chaises volantes.
 - **7 boutiques et services** : burgers, pizzas, boissons, glaces, ballons, toilettes, kiosque d'information.
 - **Constructeur de montagnes russes** (acier, bois, junior), pièce par pièce : virages, montées et descentes (normales ou raides), lift à chaîne, propulseurs, croisements à différentes hauteurs.
@@ -45,7 +48,7 @@ Sur un hébergement mutualisé, il suffit de copier le dossier `public/` à la r
 | Déplacer la vue | Clic droit glissé, flèches ou ZQSD/WASD |
 | Zoom | Molette (pincer sur mobile) |
 | Annuler l'outil | Clic droit ou Échap |
-| Pivoter la gare | R |
+| Pivoter la gare ou un modèle de montagnes russes | R |
 | Pièces de circuit | Pavé numérique (8 droit, 4/6 virages, 9/7 montées, 3/1 descentes, 5 propulseur), Retour arrière pour retirer, C pour le lift |
 | Pause / vitesses | Espace, 1, 2, 3 |
 

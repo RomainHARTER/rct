@@ -107,3 +107,7 @@ button.big { font-size: 18px; padding: 10px 26px; background: #1e8449; border-co
   #toolbar button { width: 50px; height: 46px; } #toolbar button small { display: none; }
   #palette { left: 64px; }
 }
+#hud .park-btn { margin-left: auto; font-weight: 700; background: #1e8449; border-color: #27ae60; }
+#hud .park-btn.closed { background: #b03a2e; border-color: #e74c3c; animation: pulse 1.6s infinite; }
+#hud .park-btn + .speed { margin-left: 0; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(231,76,60,.35); } }
